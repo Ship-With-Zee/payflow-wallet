@@ -115,7 +115,10 @@ Similar messages to email
 SMS is optional (some users may not have phone numbers)
 
 ### Sequence Diagram
+This diagram shows the complete end-to-end flow when a user sends money.
 
+
+`````mermaid
 sequenceDiagram
     autonumber
     participant U as User
@@ -124,14 +127,11 @@ sequenceDiagram
     participant W as Wallet Svc
     participant Q as RabbitMQ
     participant N as Notification Svc
-
     U->>G: POST /send (with Token)
     G->>T: Forward Request
-    
     Note over T, W: Synchronous Transfer
     T->>W: POST /transfer
     W-->>T: 200 OK (Success)
-    
     Note over T, Q: Asynchronous Handoff
     par Parallel Actions
         T->>Q: Publish "Transaction Complete"
