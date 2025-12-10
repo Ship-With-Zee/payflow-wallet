@@ -30,3 +30,12 @@ notification   | id, userid, transaction_id        | notification-service
 ### 2. Read .env.example to get port numbers for each service:
 
 Port numbers and services-
+```
+AUTH_SERVICE_URL=http://auth-service:3004
+WALLET_SERVICE_URL=http://wallet-service:3001
+TRANSACTION_SERVICE_URL=http://transaction-service:3002
+NOTIFICATION_SERVICE_URL=http://notification-service:3003
+REDIS_URL=redis://redis:6379
+DB_PORT=5432
+RABBITMQ_URL=amqp://payflow:payflow123@rabbitmq:5672
+```
