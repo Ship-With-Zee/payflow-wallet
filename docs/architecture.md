@@ -1,6 +1,9 @@
-### Architecture Diagram showing Auth, Wallet, Transaction, Notification, API Gateway, Frontend, DB, Redis, rabbitmq.
+### Architecture Diagram 
+This is the full architecture diagram of the payflow-wallet system showing Auth, Wallet, Transaction, Notification, API Gateway, Frontend, DB, Redis, rabbitmq.
 
 
+
+`````mermaid
 graph TD
     %% Styling
     classDef client fill:#f9f,stroke:#333,stroke-width:2px;
