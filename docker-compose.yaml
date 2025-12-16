@@ -1,0 +1,224 @@
+
+services:
+
+  # 1. INFRASTRUCTURE LAYER (DB, Cache, Queue)
+  
+  postgres:
+    image: postgres:15-alpine
+    container_name: payflow-postgres
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: password
+      POSTGRES_DB: payflow
+    
+    ports:
+      - "5432:5432" # Exposed for local debugging (DBeaver/PgAdmin)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d payflow"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: payflow-redis
+    restart: always
+    volumes:
+      - redis_data:/data
+    networks:
+      - payflow-network
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: payflow-rabbitmq
+    restart: always
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    networks:
+      - payflow-network
+    ports:
+      - "5672:5672"   # AMQP protocol
+      - "15672:15672" # Management Dashboard (http://localhost:15672)
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 10s
+      retries: 30
+      start_period: 40s
+
+  # 2. MICROSERVICES LAYER
+
+  auth-service:
+    build: ./services/auth-service
+    container_name: payflow-auth
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3004
+      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      JWT_SECRET: dev_secret_key_change_in_prod
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - payflow-network
+    ports:
+      - "3004:3004"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'        
+          memory: 256M        
+        reservations:
+          cpus: '0.10'      
+          memory: 64M
+
+  wallet-service:
+    build: ./services/wallet-service
+    container_name: payflow-wallet
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3001
+      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      REDIS_URL: redis://redis:6379
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - payflow-network
+    ports:
+      - "3001:3001"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'        
+          memory: 256M        
+        reservations:
+          cpus: '0.10'      
+          memory: 64M
+
+  transaction-service:
+    build: ./services/transaction-service
+    container_name: payflow-transaction
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3002
+      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      REDIS_URL: redis://redis:6379
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - payflow-network
+    ports:
+      - "3002:3002"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'        
+          memory: 256M        
+        reservations:
+          cpus: '0.10'      
+          memory: 64M
+
+  notification-service:
+    build: ./services/notification-service
+    container_name: payflow-notification
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3003
+      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      # Twilio credentials
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: 587
+      SMTP_USER: your_email@gmail.com
+      SMTP_PASS: your_app_password
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      postgres:
+        condition: service_healthy
+    networks:
+      - payflow-network
+    ports:
+      - "3003:3003"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.50'        
+          memory: 256M        
+        reservations:
+          cpus: '0.10'      
+          memory: 64M
+
+  # 3. ENTRY POINTS (Gateway & Frontend)
+
+  api-gateway:
+    build: ./services/api-gateway
+    container_name: api-gateway
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      PORT: 3000
+      AUTH_SERVICE_URL: http://auth-service:3004
+      WALLET_SERVICE_URL: http://wallet-service:3001
+      TRANSACTION_SERVICE_URL: http://transaction-service:3002
+      NOTIFICATION_SERVICE_URL: http://notification-service:3003
+    depends_on:
+      auth-service:
+        condition: service_started
+      wallet-service:
+        condition: service_started
+      transaction-service:
+        condition: service_started
+      notification-service:
+        condition: service_started
+    networks:
+      - payflow-network
+    ports:
+      - "3000:3000"
+
+  frontend:
+    build: ./services/frontend
+    container_name: frontend
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    networks:
+      - payflow-network
+    depends_on:
+      api-gateway:
+        condition: service_started
+
+# 4. VOLUMES & NETWORKS
+
+volumes:
+  postgres_data:
+  redis_data:
+  rabbitmq_data:
+
+networks:
+  payflow-network:
+    driver: bridge

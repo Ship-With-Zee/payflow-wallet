@@ -5,7 +5,11 @@
 
 # #### Stage 1: Install Dependencies ####
 # #### Why: Separate layer for dependencies - rarely changes ####
-FROM node:18-alpine AS deps
+FROM alpine:3.21 AS deps
+
+# Install Node.js and npm for dependencies
+RUN apk add --no-cache nodejs npm
+
 WORKDIR /app
 
 # Copy package files for dependency installation
@@ -18,7 +22,9 @@ RUN npm ci --only=production --ignore-scripts && \
 
 # #### Stage 2: Production Image ####
 # #### Why: Final image only contains what's needed ####
-FROM node:18-alpine AS production
+FROM alpine:3.21 AS production
+
+RUN apk add --no-cache nodejs dumb-init
 
 WORKDIR /app
 
@@ -38,11 +44,10 @@ COPY --chown=nodejs:nodejs . .
 USER nodejs
 
 # Expose port
-EXPOSE 3004
-
-# Health check
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3004/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+    CMD node -e "const http = require('http'); const options = { host: 'localhost', port: process.env.PORT || 3004, path: '/health', timeout: 2000 }; const req = http.request(options, (res) => process.exit(res.statusCode === 200 ? 0 : 1)); req.on('error', () => process.exit(1)); req.end();"
 
-# Start application
+# Use dumb-init
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]
+
 CMD ["node", "server.js"]

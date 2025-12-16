@@ -8,6 +8,8 @@
 FROM node:18-alpine AS deps
 WORKDIR /app
 
+RUN apk add --no-cache libc6-compat 
+
 # #### Copy package files for better caching ####
 COPY package*.json ./
 
@@ -16,6 +18,8 @@ RUN npm ci --only=production --ignore-scripts
 
 # #### Stage 2: Final Production Image ####
 FROM node:18-alpine AS production
+
+RUN apk add --no-cache dumb-init
 
 WORKDIR /app
 
@@ -32,12 +36,11 @@ COPY --chown=nodejs:nodejs . .
 # #### Switch to non-root user ####
 USER nodejs
 
-# #### Expose port ####
-EXPOSE 3000
 
 # #### Health check ####
 HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-    CMD node -e "require('http').get('http://localhost:3000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))"
+    CMD node -e "const http = require('http'); const options = { host: 'localhost', port: process.env.PORT || 3000, path: '/health', timeout: 2000 }; const req = http.request(options, (res) => process.exit(res.statusCode === 200 ? 0 : 1)); req.on('error', () => process.exit(1)); req.end();"
 
-# #### Start application ####
+ENTRYPOINT ["/usr/bin/dumb-init", "--"]  
+    
 CMD ["node", "server.js"]
