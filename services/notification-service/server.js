@@ -5,8 +5,8 @@ const nodemailer = require('nodemailer');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { param, validationResult } = require('express-validator');
-const winston = require('winston');
 const client = require('prom-client');
+const logger = require('../shared/logger');
 require('dotenv').config();
 
 const app = express();
@@ -15,28 +15,8 @@ const PORT = process.env.PORT || 3003;
 // ============================================
 // LOGGING SETUP
 // ============================================
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { 
-    service: 'notification-service',
-    environment: process.env.NODE_ENV || 'development'
-  },
-  transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
+// Set service name for shared logger
+process.env.SERVICE_NAME = 'notification-service';
 
 // ============================================
 // METRICS SETUP

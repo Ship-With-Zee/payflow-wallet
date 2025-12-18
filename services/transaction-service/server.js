@@ -6,11 +6,11 @@ const redis = require('redis');
 const helmet = require('helmet');
 const morgan = require('morgan');
 const { body, param, query, validationResult } = require('express-validator');
-const winston = require('winston');
 const client = require('prom-client');
 const CircuitBreaker = require('opossum');
 const retry = require('async-retry');
 const { v4: uuidv4 } = require('uuid');
+const logger = require('../shared/logger');
 require('dotenv').config();
 
 const app = express();
@@ -19,28 +19,8 @@ const PORT = process.env.PORT || 3002;
 // ============================================
 // LOGGING SETUP
 // ============================================
-const logger = winston.createLogger({
-  level: process.env.LOG_LEVEL || 'info',
-  format: winston.format.combine(
-    winston.format.timestamp(),
-    winston.format.errors({ stack: true }),
-    winston.format.json()
-  ),
-  defaultMeta: { 
-    service: 'transaction-service',
-    environment: process.env.NODE_ENV || 'development'
-  },
-  transports: [
-    new winston.transports.File({ filename: 'logs/error.log', level: 'error' }),
-    new winston.transports.File({ filename: 'logs/combined.log' }),
-    new winston.transports.Console({
-      format: winston.format.combine(
-        winston.format.colorize(),
-        winston.format.simple()
-      )
-    })
-  ]
-});
+// Set service name for shared logger
+process.env.SERVICE_NAME = 'transaction-service';
 
 // ============================================
 // METRICS SETUP
