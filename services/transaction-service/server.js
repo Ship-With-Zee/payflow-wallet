@@ -10,7 +10,7 @@ const client = require('prom-client');
 const CircuitBreaker = require('opossum');
 const retry = require('async-retry');
 const { v4: uuidv4 } = require('uuid');
-const logger = require('../shared/logger');
+const logger = require('./shared/logger');
 require('dotenv').config();
 
 const app = express();

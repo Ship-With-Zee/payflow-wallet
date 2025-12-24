@@ -1,4 +1,4 @@
-# Minimal nginx config for React SPA
+# Nginx config template with environment variable substitution
 server {
     listen 80;
     server_name localhost;
@@ -16,13 +16,19 @@ server {
     }
     
     # #### Proxy API requests to API Gateway ####
+    # Uses environment variable API_GATEWAY_URL (set at runtime)
     location /api {
-        proxy_pass http://api-gateway:3000;
+        proxy_pass ${API_GATEWAY_URL};
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
         proxy_redirect off;
+        
+        # Timeouts for K8s
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
     }
     
     # #### Cache static assets ####
@@ -36,3 +42,4 @@ server {
         try_files $uri $uri/ /index.html;
     }
 }
+

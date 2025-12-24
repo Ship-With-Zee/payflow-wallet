@@ -5,7 +5,7 @@ const helmet = require('helmet');
 const morgan = require('morgan');
 const { body, param, validationResult } = require('express-validator');
 const client = require('prom-client');
-const logger = require('../shared/logger');
+const logger = require('./shared/logger');
 require('dotenv').config();
 
 // #### Prometheus Metrics Setup ####
