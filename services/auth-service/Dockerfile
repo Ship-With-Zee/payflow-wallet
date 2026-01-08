@@ -17,7 +17,7 @@ COPY package*.json ./
 
 # Install ONLY production dependencies
 # --ignore-scripts: Skip lifecycle scripts (faster install)
-RUN npm ci --only=production --ignore-scripts && \
+RUN npm install --only=production --ignore-scripts && \
     npm cache clean --force
 
 # #### Stage 2: Production Image ####

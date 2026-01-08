@@ -14,7 +14,7 @@ RUN apk add --no-cache libc6-compat
 COPY package*.json ./
 
 # #### Install only production dependencies ####
-RUN npm ci --only=production --ignore-scripts
+RUN npm install --only=production --ignore-scripts
 
 # #### Stage 2: Final Production Image ####
 FROM node:18-alpine AS production

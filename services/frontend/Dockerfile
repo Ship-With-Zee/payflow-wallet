@@ -21,7 +21,9 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY . .
 
 # #### Set build arguments and environment variables ####
-ARG REACT_APP_API_URL=https://api.payflow.local/api
+# ARG REACT_APP_API_URL=https://api.payflow.local/api
+ARG REACT_APP_API_URL=http://localhost:3000/api   
+# Default to localhost for local development
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
 # #### Build the optimized production React app ####

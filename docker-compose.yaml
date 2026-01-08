@@ -1,126 +1,228 @@
 
+
+# #### Docker Compose Configuration ####
+# #### This file defines all services needed to run PayFlow locally ####
+
 services:
-
-  # 1. INFRASTRUCTURE LAYER (DB, Cache, Queue)
+  # ============================================
+  # INFRASTRUCTURE SERVICES
+  # ============================================
   
+  # #### PostgreSQL Database ####
+  # #### This stores all persistent data (users, wallets, transactions) ####
   postgres:
-    image: postgres:15-alpine
-    container_name: payflow-postgres
-    restart: always
+    image: postgres:15-alpine  # Use PostgreSQL version 15 with Alpine Linux (smaller image)
     environment:
-      POSTGRES_USER: user
-      POSTGRES_PASSWORD: password
-      POSTGRES_DB: payflow
-    
+      POSTGRES_DB: payflow      # Database name
+      POSTGRES_USER: payflow    # Database user
+      POSTGRES_PASSWORD: payflow123  # Database password (use secrets in production!)
     ports:
-      - "5432:5432" # Exposed for local debugging (DBeaver/PgAdmin)
+      - "5432:5432"  # Expose PostgreSQL port to host
+    volumes:
+      - postgres_data:/var/lib/postgresql/data  # Persist database data
+      - ./migrations:/docker-entrypoint-initdb.d  # Run database migrations on startup
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U user -d payflow"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+      test: ["CMD-SHELL", "pg_isready -U payflow"]  # Check if database is ready
+      interval: 10s    # Check every 10 seconds
+      timeout: 5s      # Wait 5 seconds for response
+      retries: 5       # Try 5 times before marking as unhealthy
+      start_period: 30s
+    networks:
+      - payflow-network  # Connect to our custom network
 
+  # #### Redis Cache ####
+  # #### This stores temporary data (sessions, cache, rate limiting) ####
   redis:
-    image: redis:7-alpine
-    container_name: payflow-redis
-    restart: always
-    volumes:
-      - redis_data:/data
-    networks:
-      - payflow-network
+    image: redis:7-alpine  # Use Redis version 7 with Alpine Linux
     ports:
-      - "6379:6379"
+      - "6379:6379"  # Expose Redis port to host
+    volumes:
+      - redis_data:/data  # Persist Redis data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD", "redis-cli", "ping"]  # Check if Redis is responding
       interval: 10s
       timeout: 5s
       retries: 5
-
-  rabbitmq:
-    image: rabbitmq:3-management-alpine
-    container_name: payflow-rabbitmq
-    restart: always
-    environment:
-      RABBITMQ_DEFAULT_USER: guest
-      RABBITMQ_DEFAULT_PASS: guest
-    volumes:
-      - rabbitmq_data:/var/lib/rabbitmq
     networks:
       - payflow-network
+
+  # #### RabbitMQ Message Queue ####
+  # #### This handles asynchronous communication between services ####
+  # #### Used for transaction processing and notifications ####
+  rabbitmq:
+    image: rabbitmq:3-management-alpine # #### RabbitMQ with management UI ####
     ports:
-      - "5672:5672"   # AMQP protocol
-      - "15672:15672" # Management Dashboard (http://localhost:15672)
+      - "5672:5672"   # #### AMQP port for message publishing ####
+      - "15672:15672" # #### Management UI port ####
+    environment:
+      RABBITMQ_DEFAULT_USER: payflow     # #### RabbitMQ username ####
+      RABBITMQ_DEFAULT_PASS: payflow123  # #### RabbitMQ password ####
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq  # #### Persist RabbitMQ data ####
     healthcheck:
-      test: rabbitmq-diagnostics -q ping
+      test: ["CMD", "rabbitmq-diagnostics", "ping"] # #### Check if RabbitMQ is responding ####
       interval: 10s
       timeout: 10s
       retries: 30
       start_period: 40s
+    networks:
+      - payflow-network
 
-  # 2. MICROSERVICES LAYER
+  # ============================================
+  # MONITORING STACK (COMMENTED OUT - REQUIRES CONFIG FILES)
+  # ============================================
+  # prometheus:
+  #   image: prom/prometheus:latest
+  #   ports:
+  #     - "9090:9090"
+  #   volumes:
+  #     - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml
+  #     - ./monitoring/alerts.yml:/etc/prometheus/alerts.yml
+  #     - prometheus_data:/prometheus
+  #   command:
+  #     - '--config.file=/etc/prometheus/prometheus.yml'
+  #     - '--storage.tsdb.path=/prometheus'
+  #     - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+  #     - '--web.console.templates=/usr/share/prometheus/consoles'
+  #   networks:
+  #     - payflow-network
 
+  # grafana:
+  #   image: grafana/grafana:latest
+  #   ports:
+  #     - "3006:3000"
+  #   environment:
+  #     - GF_SECURITY_ADMIN_PASSWORD=admin
+  #     - GF_USERS_ALLOW_SIGN_UP=false
+  #   volumes:
+  #     - grafana_data:/var/lib/grafana
+  #     - ./monitoring/grafana-dashboards:/etc/grafana/provisioning/dashboards
+  #     - ./monitoring/grafana-datasources.yml:/etc/grafana/provisioning/datasources/datasource.yml
+  #   depends_on:
+  #     - prometheus
+  #   networks:
+  #     - payflow-network
+
+  # alertmanager:
+  #   image: prom/alertmanager:latest
+  #   ports:
+  #     - "9093:9093"
+  #   volumes:
+  #     - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml
+  #     - alertmanager_data:/alertmanager
+  #   command:
+  #     - '--config.file=/etc/alertmanager/alertmanager.yml'
+  #     - '--storage.path=/alertmanager'
+  #   networks:
+  #     - payflow-network
+
+  # ============================================
+  # LOGGING STACK (COMMENTED OUT - REQUIRES CONFIG FILES)
+  # ============================================
+  # loki:
+  #   image: grafana/loki:latest
+  #   ports:
+  #     - "3100:3100"
+  #   command: -config.file=/etc/loki/local-config.yaml
+  #   volumes:
+  #     - loki_data:/loki
+  #   networks:
+  #     - payflow-network
+
+  # promtail:
+  #   image: grafana/promtail:latest
+  #   volumes:
+  #     - /var/log:/var/log
+  #     - ./services:/services:ro
+  #     - ./monitoring/promtail-config.yml:/etc/promtail/config.yml
+  #   command: -config.file=/etc/promtail/config.yml
+  #   networks:
+  #     - payflow-network
+
+  # ============================================
+  # APPLICATION SERVICES
+  # ============================================
   auth-service:
     build: ./services/auth-service
-    container_name: payflow-auth
-    restart: unless-stopped
+    user: "root"
+    ports:
+      - "3004:3004"
     environment:
-      NODE_ENV: production
       PORT: 3004
-      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
-      JWT_SECRET: dev_secret_key_change_in_prod
+      DATABASE_URL: postgresql://payflow:payflow123@postgres:5432/payflow
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payflow
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      REDIS_URL: redis://redis:6379
+      JWT_SECRET: your-super-secret-jwt-key-change-in-production
+      JWT_EXPIRES_IN: 24h
+      NODE_ENV: development
+      SERVICE_NAME: auth-service
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - payflow-network
-    ports:
-      - "3004:3004"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'        
-          memory: 256M        
-        reservations:
-          cpus: '0.10'      
-          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3004/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   wallet-service:
     build: ./services/wallet-service
-    container_name: payflow-wallet
-    restart: unless-stopped
+    user: "root"  
+    ports:
+      - "3001:3001"
     environment:
-      NODE_ENV: production
       PORT: 3001
-      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      DATABASE_URL: postgresql://payflow:payflow123@postgres:5432/payflow
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payflow
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
       REDIS_URL: redis://redis:6379
+      NODE_ENV: development
+      CONTAINER_ENV: "true"
+      SERVICE_NAME: wallet-service
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
     networks:
       - payflow-network
-    ports:
-      - "3001:3001"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'        
-          memory: 256M        
-        reservations:
-          cpus: '0.10'      
-          memory: 64M
 
   transaction-service:
     build: ./services/transaction-service
-    container_name: payflow-transaction
-    restart: unless-stopped
+    user: "root"
+    ports:
+      - "3005:3002"
     environment:
-      NODE_ENV: production
       PORT: 3002
-      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
+      DATABASE_URL: postgresql://payflow:payflow123@postgres:5432/payflow
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payflow
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      RABBITMQ_URL: amqp://payflow:payflow123@rabbitmq:5672
       REDIS_URL: redis://redis:6379
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
+      WALLET_SERVICE_URL: http://wallet-service:3001
+      NODE_ENV: development
+      CONTAINER_ENV: "true"
+      SERVICE_NAME: transaction-service
     depends_on:
       postgres:
         condition: service_healthy
@@ -128,96 +230,97 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      wallet-service:
+        condition: service_healthy
     networks:
       - payflow-network
-    ports:
-      - "3002:3002"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'        
-          memory: 256M        
-        reservations:
-          cpus: '0.10'      
-          memory: 64M
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3002/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   notification-service:
     build: ./services/notification-service
-    container_name: payflow-notification
-    restart: unless-stopped
+    user: "root"
+    ports:
+      - "3003:3003"
     environment:
-      NODE_ENV: production
       PORT: 3003
-      DATABASE_URL: postgresql://user:password@postgres:5432/payflow
-      RABBITMQ_URL: amqp://guest:guest@rabbitmq:5672
-      # Twilio credentials
-      SMTP_HOST: smtp.gmail.com
-      SMTP_PORT: 587
-      SMTP_USER: your_email@gmail.com
-      SMTP_PASS: your_app_password
+      DATABASE_URL: postgresql://payflow:payflow123@postgres:5432/payflow
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: payflow
+      DB_USER: payflow
+      DB_PASSWORD: payflow123
+      RABBITMQ_URL: amqp://payflow:payflow123@rabbitmq:5672
+      NODE_ENV: development
+      CONTAINER_ENV: "true"
+      SERVICE_NAME: notification-service
     depends_on:
-      rabbitmq:
-        condition: service_healthy
       postgres:
+        condition: service_healthy
+      rabbitmq:
         condition: service_healthy
     networks:
       - payflow-network
-    ports:
-      - "3003:3003"
-    deploy:
-      resources:
-        limits:
-          cpus: '0.50'        
-          memory: 256M        
-        reservations:
-          cpus: '0.10'      
-          memory: 64M
-
-  # 3. ENTRY POINTS (Gateway & Frontend)
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3003/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
   api-gateway:
     build: ./services/api-gateway
-    container_name: api-gateway
-    restart: unless-stopped
+    ports:
+      - "3000:3000"
     environment:
-      NODE_ENV: production
       PORT: 3000
       AUTH_SERVICE_URL: http://auth-service:3004
       WALLET_SERVICE_URL: http://wallet-service:3001
       TRANSACTION_SERVICE_URL: http://transaction-service:3002
       NOTIFICATION_SERVICE_URL: http://notification-service:3003
+      NODE_ENV: development
+      SERVICE_NAME: api-gateway
+      CORS_ORIGIN: "*"
     depends_on:
-      auth-service:
-        condition: service_started
-      wallet-service:
-        condition: service_started
-      transaction-service:
-        condition: service_started
-      notification-service:
-        condition: service_started
+      - auth-service
+      - wallet-service
+      - transaction-service
+      - notification-service
     networks:
       - payflow-network
-    ports:
-      - "3000:3000"
+    healthcheck:
+      test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:3000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
+  # ============================================
+  # FRONTEND
+  # ============================================
   frontend:
-    build: ./services/frontend
+    build:
+      context: ./services/frontend  
+      args:
+        - REACT_APP_API_URL=http://localhost:3000/api  
     container_name: frontend
     restart: unless-stopped
     ports:
       - "80:80"
+    depends_on:
+      - api-gateway
     networks:
       - payflow-network
-    depends_on:
-      api-gateway:
-        condition: service_started
-
-# 4. VOLUMES & NETWORKS
 
 volumes:
   postgres_data:
   redis_data:
   rabbitmq_data:
+  # prometheus_data:
+  # grafana_data:
+  # alertmanager_data:
+  # loki_data:
 
 networks:
   payflow-network:

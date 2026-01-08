@@ -11,7 +11,7 @@ WORKDIR /app
 
 COPY package*.json ./
 
-RUN npm ci --only=production --ignore-scripts && \
+RUN npm install --only=production --ignore-scripts && \
     npm cache clean --force
 
 FROM alpine:3.21 AS production
