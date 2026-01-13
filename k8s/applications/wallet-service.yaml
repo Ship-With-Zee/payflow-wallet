@@ -1,0 +1,126 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wallet-service
+  namespace: payflow
+spec:
+  type: ClusterIP
+  selector:
+    app: wallet-service
+  ports:
+    - port: 3001
+      targetPort: 3001
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: wallet-service
+  namespace: payflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: wallet-service
+  template:
+    metadata:
+      labels:
+        app: wallet-service
+    spec:
+      # Security: Allow writing to volumes
+      securityContext:
+        fsGroup: 1001
+      
+      containers:
+        - name: wallet-service
+          image: payflow-wallet:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3001
+          
+          # Resource Limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          env:
+            # 1. Core Config
+            - name: PORT
+              value: "3001"
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: NODE_ENV
+            - name: CONTAINER_ENV   # <--- Wallet Specific
+              value: "true"
+            - name: SERVICE_NAME    # <--- Wallet Specific
+              value: "wallet-service"
+            
+            # 2. Universal Database Config
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DATABASE_URL
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DB_PASSWORD
+            
+            # 3. Redis
+            - name: REDIS_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: REDIS_URL
+
+          volumeMounts:
+            - name: logs-volume
+              mountPath: /app/logs
+
+          # Probes
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3001
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+      volumes:
+        - name: logs-volume
+          emptyDir: {}

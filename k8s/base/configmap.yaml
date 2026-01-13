@@ -1,0 +1,31 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: payflow-config
+  namespace: payflow
+data:
+  # Database Config (Non-sensitive)
+  DB_HOST: "postgres-service"
+  DB_PORT: "5432"
+  DB_NAME: "payflow"
+  
+  # Redis Config
+  REDIS_HOST: "redis-service"
+  REDIS_PORT: "6379"
+  REDIS_URL: "redis://redis-service:6379" # Redis has no password in this setup, so it's safe here
+  
+  RABBITMQ_HOST: "rabbitmq-service"
+  RABBITMQ_PORT: "5672"
+  RABBITMQ_MANAGEMENT_PORT: "15672"
+  
+  # Internal DNS URLs
+  AUTH_SERVICE_URL: "http://auth-service:3004"
+  WALLET_SERVICE_URL: "http://wallet-service:3001"
+  TRANSACTION_SERVICE_URL: "http://transaction-service:3002"
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3003"
+  
+  # App Config
+  NODE_ENV: "development"
+  LOG_LEVEL: "info"
+  CONTAINER_ENV: "true"
+  JWT_EXPIRES_IN: "24h"

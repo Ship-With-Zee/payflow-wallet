@@ -1,0 +1,140 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: notification-service
+  namespace: payflow
+spec:
+  type: ClusterIP
+  selector:
+    app: notification-service
+  ports:
+    - port: 3003
+      targetPort: 3003
+      protocol: TCP
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: notification-service
+  namespace: payflow
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: notification-service
+  template:
+    metadata:
+      labels:
+        app: notification-service
+    spec:
+      # Security: Allow writing to volumes
+      securityContext:
+        fsGroup: 1001
+      
+      containers:
+        - name: notification-service
+          image: payflow-notification:latest
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 3003
+          
+          # Resource Limits
+          resources:
+            requests:
+              memory: "128Mi"
+              cpu: "100m"
+            limits:
+              memory: "512Mi"
+              cpu: "500m"
+
+          env:
+            # 1. Core Config
+            - name: PORT
+              value: "3003"
+            - name: NODE_ENV
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: NODE_ENV
+            - name: CONTAINER_ENV
+              value: "true"
+            - name: SERVICE_NAME
+              value: "notification-service"
+
+            # 2. RabbitMQ Config (CRITICAL for this service)
+            - name: RABBITMQ_URL
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: RABBITMQ_URL
+
+            # 3. Universal Database Config
+            # (Even if Notification only reads, we provide the standard block)
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DATABASE_URL
+            - name: DB_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_HOST
+            - name: DB_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_PORT
+            - name: DB_NAME
+              valueFrom:
+                configMapKeyRef:
+                  name: payflow-config
+                  key: DB_NAME
+            - name: DB_USER
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DB_USER
+            - name: DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: DB_PASSWORD
+            
+            # 4. Optional: SMTP Secrets (if you added them to secrets.yaml)
+            - name: SMTP_USER
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: SMTP_USER
+            - name: SMTP_PASS
+              valueFrom:
+                secretKeyRef:
+                  name: payflow-secrets
+                  key: SMTP_PASS
+
+          # Logs Volume Mount
+          volumeMounts:
+            - name: logs-volume
+              mountPath: /app/logs
+
+          # Relaxed Probes
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 60
+            periodSeconds: 20
+            timeoutSeconds: 5
+            failureThreshold: 5
+          readinessProbe:
+            httpGet:
+              path: /health
+              port: 3003
+            initialDelaySeconds: 20
+            periodSeconds: 10
+            timeoutSeconds: 5
+
+      volumes:
+        - name: logs-volume
+          emptyDir: {}

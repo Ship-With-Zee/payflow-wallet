@@ -1,0 +1,75 @@
+# 1. INGRESS (Networking Criteria)
+# Maps payflow.local to services
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: payflow-ingress
+  namespace: payflow
+  annotations:
+    nginx.ingress.kubernetes.io/rewrite-target: /
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: payflow.local
+      http:
+        paths:
+          # Frontend Route
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: payflow-frontend
+                port:
+                  number: 80
+          # API Gateway Route
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: api-gateway
+                port:
+                  number: 3000
+---
+# 2. HPA (Scaling Criteria)
+# Autoscales API Gateway based on CPU usage
+apiVersion: autoscaling/v1
+kind: HorizontalPodAutoscaler
+metadata:
+  name: api-gateway-hpa
+  namespace: payflow
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: api-gateway
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+---
+# 3. POD DISRUPTION BUDGET (Availability Criteria)
+# Ensures at least 1 Auth pod is always up during maintenance
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: auth-pdb
+  namespace: payflow
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels:
+      app: auth-service
+---
+# 4. NETWORK POLICY (Security Criteria)
+# Only allow traffic strictly within the payflow namespace
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: default-deny-external
+  namespace: payflow
+spec:
+  podSelector: {}
+  policyTypes:
+  - Ingress
+  ingress:
+  - from:
+    - podSelector: {} 
