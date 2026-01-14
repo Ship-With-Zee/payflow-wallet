@@ -2,7 +2,10 @@
 
 #Ignore cursor AI rules
 .cursor/rules/codacy.mdc
+.codacy/
 
+# Debug files
+DEBUG_USER_LIST.md
 
 # Dependencies
 node_modules/
