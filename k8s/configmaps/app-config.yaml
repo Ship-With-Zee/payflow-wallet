@@ -1,0 +1,36 @@
+# #### PayFlow Application Configuration ####
+# #### This ConfigMap stores non-sensitive configuration data ####
+# #### ConfigMaps separate configuration from application code ####
+
+apiVersion: v1  # #### Kubernetes API version ####
+kind: ConfigMap  # #### Resource type - stores configuration data ####
+metadata:
+  name: app-config  # #### ConfigMap name ####
+  namespace: payflow  # #### Namespace where this ConfigMap lives ####
+data:
+  # #### Database Configuration ####
+  DB_HOST: "postgres"  # #### PostgreSQL service name (Kubernetes DNS) ####
+  DB_PORT: "5432"      # #### PostgreSQL default port ####
+  DB_NAME: "payflow"   # #### Database name ####
+  
+  # #### Cache Configuration ####
+  REDIS_URL: "redis://redis:6379"  # #### Redis connection URL ####
+  
+  # #### Message Queue Configuration ####
+  # NOTE: RabbitMQ credentials are now in AWS Secrets Manager
+  # The URL should be constructed dynamically in the application using:
+  # RABBITMQ_USER and RABBITMQ_PASSWORD from db-secrets Kubernetes Secret
+  # For now, keeping placeholder - update your application to build URL from secrets
+  RABBITMQ_URL: "amqp://${RABBITMQ_USER}:${RABBITMQ_PASSWORD}@rabbitmq:5672"  # #### Use secrets - will be replaced by application code ####
+  
+  # Alternative: Store only the base URL, construct full URL in application
+  # RABBITMQ_HOST: "rabbitmq"
+  # RABBITMQ_PORT: "5672"
+  # Application code should read RABBITMQ_USER and RABBITMQ_PASSWORD from secrets
+  
+  # #### Service URLs ####
+  # #### These URLs are used for service-to-service communication ####
+  AUTH_SERVICE_URL: "http://auth-service:3004"        # #### Authentication service ####
+  WALLET_SERVICE_URL: "http://wallet-service:3001"     # #### Wallet service ####
+  TRANSACTION_SERVICE_URL: "http://transaction-service:3002"  # #### Transaction service ####
+  NOTIFICATION_SERVICE_URL: "http://notification-service:3003"  # #### Notification service ####

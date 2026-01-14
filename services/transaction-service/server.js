@@ -329,6 +329,21 @@ initRabbitMQ().catch(console.error);
 // ============================================
 // TRANSACTION PROCESSING
 // ============================================
+// ============================================
+// PROCESS TRANSACTION (Worker Function)
+// ============================================
+// This function is called by the worker when it consumes a message from RabbitMQ
+// It processes the actual money transfer
+//
+// Critical safety check: Idempotency
+// Before processing, we check if transaction was already processed
+// This prevents duplicate charges if:
+// - Worker crashes mid-processing, RabbitMQ retries
+// - Network issues cause duplicate messages
+// - Multiple workers process same message
+//
+// Flow:
+// Worker consumes message → Check database (idempotency) → Process transfer → Update status
 async function processTransaction(transaction, retryCount = 0) {
   const startTime = Date.now();
   const client = await pool.connect();
@@ -340,7 +355,10 @@ async function processTransaction(transaction, retryCount = 0) {
       retryCount
     });
 
-    // Update to PROCESSING
+    // STEP 1: Update status to PROCESSING
+    // This marks the transaction as "in progress"
+    // If worker crashes here, transaction stays in PROCESSING
+    // CronJob will eventually reverse it if stuck too long
     await client.query(
       `UPDATE transactions 
        SET status = 'PROCESSING', processing_started_at = CURRENT_TIMESTAMP 
@@ -348,15 +366,26 @@ async function processTransaction(transaction, retryCount = 0) {
       [transaction.id]
     );
 
-    // Simulate processing time
+    // Simulate processing time (for demo purposes)
+    // In production, this would be actual processing
     await new Promise(resolve => setTimeout(resolve, 2000 + Math.random() * 1000));
 
-    // Random 10% failure for demo
+    // Random 10% failure for demo (simulates network issues, etc.)
     if (Math.random() < 0.1) {
       throw new Error('Network timeout or insufficient funds');
     }
 
-    // Call wallet service with circuit breaker and retry
+    // STEP 2: Call Wallet Service to transfer money
+    // This is where the actual money movement happens
+    // Wallet Service will:
+    // - Lock sender's wallet
+    // - Lock receiver's wallet
+    // - Check sufficient funds
+    // - Debit sender, credit receiver
+    // - Commit database transaction
+    //
+    // Circuit breaker: Prevents cascading failures
+    // If wallet service is down, circuit opens, prevents repeated calls
     await retry(async () => {
       return walletServiceBreaker.fire({
         fromUserId: transaction.from_user_id,
@@ -365,8 +394,8 @@ async function processTransaction(transaction, retryCount = 0) {
         correlationId: transaction.id
       });
     }, { 
-      retries: 2,
-      minTimeout: 1000,
+      retries: 2,  // Retry up to 2 times on failure
+      minTimeout: 1000,  // Wait 1 second between retries
       onRetry: (error, attempt) => {
         logger.warn('Retrying wallet service call:', {
           transactionId: transaction.id,
@@ -376,7 +405,9 @@ async function processTransaction(transaction, retryCount = 0) {
       }
     });
 
-    // Update to COMPLETED
+    // STEP 3: Update status to COMPLETED
+    // Money has been transferred successfully
+    // This is the final state for successful transactions
     await client.query(
       `UPDATE transactions 
        SET status = 'COMPLETED', completed_at = CURRENT_TIMESTAMP 
@@ -544,7 +575,27 @@ app.post('/transactions',
   }
 );
 
+// ============================================
+// CREATE TRANSACTION
+// ============================================
+// This function is called when a user wants to send money
+// It does two critical things:
+// 1. Writes transaction to PostgreSQL (status: PENDING)
+// 2. Publishes message to RabbitMQ for async processing
+//
+// Why this pattern?
+// - User gets immediate response (doesn't wait for processing)
+// - Work is queued safely (survives service restarts)
+// - Can handle traffic spikes (messages queue up)
+//
+// Flow:
+// User → API Gateway → Transaction Service → PostgreSQL (PENDING)
+//                                              → RabbitMQ (message queued)
+//                                              → Return "queued" to user
 async function createTransaction(fromUserId, toUserId, amount, correlationId) {
+  // Generate unique transaction ID
+  // Format: TXN-<timestamp>-<random>
+  // Example: TXN-1703123456789-A3F9K2M
   const transactionId = `TXN-${Date.now()}-${Math.random().toString(36).substr(2, 9).toUpperCase()}`;
 
   logger.info('Creating transaction:', {
@@ -555,24 +606,36 @@ async function createTransaction(fromUserId, toUserId, amount, correlationId) {
     amount
   });
 
+  // STEP 1: Write transaction to PostgreSQL
+  // Status: PENDING (not processed yet)
+  // This is the source of truth - if service crashes, transaction is still recorded
   await pool.query(
     `INSERT INTO transactions (id, from_user_id, to_user_id, amount, status) 
      VALUES ($1, $2, $3, $4, 'PENDING')`,
     [transactionId, fromUserId, toUserId, amount]
   );
 
+  // Track metric for monitoring
   transactionTotal.labels('pending', 'transfer').inc();
 
-  // Add to queue
+  // STEP 2: Publish message to RabbitMQ
+  // This queues the work for async processing
+  // Worker will pick up this message and process the transaction
+  // Why RabbitMQ?
+  // - Messages persist (survive service restarts)
+  // - Handles retries automatically
+  // - Decouples transaction creation from processing
   if (channel) {
     channel.sendToQueue('transactions', Buffer.from(JSON.stringify({
       id: transactionId,
       from_user_id: fromUserId,
       to_user_id: toUserId,
       amount: parseFloat(amount)
-    })), { persistent: true });
+    })), { persistent: true });  // persistent: true = message survives RabbitMQ restart
   }
 
+  // Return immediately to user
+  // User doesn't wait for processing - gets instant feedback
   return {
     id: transactionId,
     status: 'PENDING',

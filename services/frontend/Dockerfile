@@ -21,7 +21,9 @@ RUN --mount=type=cache,target=/root/.npm \
 COPY . .
 
 # #### Set build arguments and environment variables ####
-ARG REACT_APP_API_URL=http://localhost:3000/api
+# Default to relative URL - works in all environments (dev, staging, prod)
+# Can be overridden at build time or runtime via Kubernetes env vars
+ARG REACT_APP_API_URL=/api
 ENV REACT_APP_API_URL=$REACT_APP_API_URL
 
 # #### Build the optimized production React app ####

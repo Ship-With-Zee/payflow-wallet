@@ -1,7 +1,42 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { Send, ArrowDownLeft, Clock, CheckCircle, XCircle, Activity, Bell, Wallet, AlertCircle, LogOut, User } from 'lucide-react';
 
-const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:3000/api';
+// ============================================
+// API URL Configuration - Environment-Aware
+// ============================================
+// Supports multiple deployment scenarios:
+// 1. Relative URL (/api) - Works with ingress, nginx proxies to api-gateway
+// 2. Full URL (http://api-gateway:3000/api) - Direct service communication (internal)
+// 3. External URL (https://api.payflow.com/api) - Production with real domain
+// 4. Default (http://localhost:3000/api) - Local development fallback
+//
+// How it works:
+// - Relative URLs (/api): Browser makes request to same origin, nginx proxies it
+// - Absolute URLs: Direct fetch to specified endpoint
+// - Environment variable REACT_APP_API_URL can be set per environment
+const getApiBaseUrl = () => {
+  const envUrl = process.env.REACT_APP_API_URL;
+  
+  // If no env var, use relative URL (works with ingress/nginx)
+  if (!envUrl) {
+    return '/api';
+  }
+  
+  // If it's already a relative URL, use as-is
+  if (envUrl.startsWith('/')) {
+    return envUrl;
+  }
+  
+  // If it's an absolute URL (http:// or https://), use it directly
+  if (envUrl.startsWith('http://') || envUrl.startsWith('https://')) {
+    return envUrl;
+  }
+  
+  // Fallback: treat as relative
+  return envUrl.startsWith('/') ? envUrl : `/${envUrl}`;
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 class APIClient {
   static getToken() {
@@ -39,7 +74,28 @@ class APIClient {
 
       if (!response.ok) {
         const error = await response.json().catch(() => ({ error: 'Request failed' }));
-        throw new Error(error.error || `HTTP ${response.status}`);
+        // Handle validation errors from express-validator
+        if (error.errors && Array.isArray(error.errors)) {
+          // Group errors by field and create user-friendly messages
+          const passwordErrors = error.errors
+            .filter(e => e.path === 'password')
+            .map(e => e.msg);
+          
+          if (passwordErrors.length > 0) {
+            // Show password requirements clearly
+            throw new Error(`Password requirements: ${passwordErrors.join(', ')}`);
+          }
+          
+          // For other fields, show the error messages
+          const errorMessages = error.errors.map(e => {
+            if (e.path === 'email') return `Email: ${e.msg}`;
+            if (e.path === 'name') return `Name: ${e.msg}`;
+            return `${e.path}: ${e.msg}`;
+          }).join('. ');
+          
+          throw new Error(errorMessages || 'Validation failed');
+        }
+        throw new Error(error.error || error.message || `HTTP ${response.status}`);
       }
 
       return await response.json();

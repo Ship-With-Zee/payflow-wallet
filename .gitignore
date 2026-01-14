@@ -53,8 +53,16 @@ k8s/secrets/cloudflare-tunnel-secret.yaml
 *.sqlite
 
 # Documentation (optimization results, etc)
-DOCKER_OPTIMIZATION_RESULTS.md
-docs/AWS/letgo/
+docs/
+
+# Kubernetes
+k8s/
+
+# Docker Hub push scripts and logs
+docker-push*.sh
+docker-push*.log
+*_push.log
+dockerhub-push*.sh
 
 #Ignore cursor AI rules
 .cursor/rules/codacy.mdc

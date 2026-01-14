@@ -1,0 +1,172 @@
+# ============================================
+# Database Migration Job
+# ============================================
+# Purpose: Creates database tables and indexes on first deployment
+# Why: Ensures database schema exists before services start
+# When: Runs once when deployed (Job completes and doesn't restart)
+# What happens without it: Services will fail because tables don't exist
+
+# ============================================
+# Kubernetes Job Configuration
+# ============================================
+apiVersion: batch/v1  # Kubernetes batch API version (for Jobs and CronJobs)
+kind: Job  # Resource type - runs a task to completion (one-time execution)
+# Job vs CronJob:
+# - Job: Runs once and completes (perfect for migrations)
+# - CronJob: Runs on a schedule (for recurring tasks)
+metadata:
+  name: db-migration-job  # Unique name for this job
+  namespace: payflow  # Namespace where the job will run
+spec:
+  # ============================================
+  # Pod Template
+  # ============================================
+  # Job creates pods from this template
+  template:
+    spec:
+      # ============================================
+      # Restart Policy
+      # ============================================
+      restartPolicy: OnFailure  # Restart if failed, but don't retry indefinitely
+      # Options:
+      # - Never: Don't restart (job fails permanently)
+      # - OnFailure: Retry on failure (good for migrations)
+      # - Always: Always restart (not used for Jobs)
+      
+      # ============================================
+      # Container Configuration
+      # ============================================
+      containers:
+      - name: db-migration  # Container name
+        image: postgres:15-alpine  # Use PostgreSQL client image (includes psql and pg_isready)
+        # Why postgres image: Contains all PostgreSQL client tools we need
+        
+        # ============================================
+        # Command and Arguments
+        # ============================================
+        command: ['sh', '-c']  # Run shell with -c flag to execute script
+        args:
+        - |
+          # ============================================
+          # Step 1: Wait for PostgreSQL to be Ready
+          # ============================================
+          # Why: Job might start before PostgreSQL pod is ready
+          # pg_isready: PostgreSQL utility that checks if database is accepting connections
+          echo "Waiting for PostgreSQL to be ready..."
+          until pg_isready -h postgres -p 5432 -U $POSTGRES_USER; do
+            # -h postgres: Hostname (Kubernetes service DNS name)
+            # -p 5432: PostgreSQL default port
+            # -U $POSTGRES_USER: Database user from environment variable
+            echo "PostgreSQL not ready, waiting..."
+            sleep 5  # Wait 5 seconds before checking again
+          done
+          # Loop continues until pg_isready returns success (exit code 0)
+          
+          echo "PostgreSQL is ready! Running migrations..."
+          
+          # ============================================
+          # Step 2: Create Users Table
+          # ============================================
+          # Why: Auth service needs this table to store user accounts
+          # IF NOT EXISTS: Safe to run multiple times - won't fail if table already exists
+          psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "
+          CREATE TABLE IF NOT EXISTS users (
+            id SERIAL PRIMARY KEY,  # Auto-incrementing integer primary key
+            email VARCHAR(255) UNIQUE NOT NULL,  # Unique email (used for login)
+            password_hash VARCHAR(255) NOT NULL,  # Hashed password (never store plain text)
+            name VARCHAR(255) NOT NULL,  # User's full name
+            role VARCHAR(50) DEFAULT 'user',  # User role (user, admin, etc.)
+            is_active BOOLEAN DEFAULT true,  # Account status (can disable accounts)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  # Auto-set on creation
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  # Auto-set on creation/update
+          );"
+          # -c flag: Execute SQL command directly (non-interactive)
+          
+          # ============================================
+          # Step 3: Create Wallets Table
+          # ============================================
+          # Why: Wallet service needs this to store user wallet balances
+          psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "
+          CREATE TABLE IF NOT EXISTS wallets (
+            id SERIAL PRIMARY KEY,  # Wallet ID
+            user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,  # Foreign key to users
+            # ON DELETE CASCADE: If user is deleted, delete their wallets too
+            name VARCHAR(255) NOT NULL,  # Wallet name (e.g., "Main Wallet", "Savings")
+            balance DECIMAL(15,2) DEFAULT 0.00,  # Wallet balance (15 digits, 2 decimal places)
+            # DECIMAL: Exact precision (important for money - no floating point errors)
+            currency VARCHAR(3) DEFAULT 'USD',  # Currency code (USD, EUR, etc.)
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+          );"
+          
+          # ============================================
+          # Step 4: Create Transactions Table
+          # ============================================
+          # Why: Transaction service needs this to record all money transfers
+          psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "
+          CREATE TABLE IF NOT EXISTS transactions (
+            id SERIAL PRIMARY KEY,  # Transaction ID
+            from_wallet_id INTEGER REFERENCES wallets(id),  # Source wallet (can be NULL for deposits)
+            to_wallet_id INTEGER REFERENCES wallets(id),  # Destination wallet (can be NULL for withdrawals)
+            amount DECIMAL(15,2) NOT NULL,  # Transaction amount (must be positive)
+            currency VARCHAR(3) DEFAULT 'USD',  # Currency
+            status VARCHAR(50) DEFAULT 'pending',  # Status: pending, completed, failed
+            description TEXT,  # Optional transaction description
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,  # When transaction was created
+            updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP  # When transaction was last updated
+          );"
+          
+          # ============================================
+          # Step 5: Create Indexes for Performance
+          # ============================================
+          # Why: Indexes speed up database queries significantly
+          # Without indexes: Full table scans (slow for large tables)
+          # With indexes: Direct lookups (fast even for millions of rows)
+          psql -h postgres -U $POSTGRES_USER -d $POSTGRES_DB -c "
+          -- Index on email: Speeds up login queries (WHERE email = 'user@example.com')
+          CREATE INDEX IF NOT EXISTS idx_users_email ON users(email);
+          
+          -- Index on user_id: Speeds up "get all wallets for user" queries
+          CREATE INDEX IF NOT EXISTS idx_wallets_user_id ON wallets(user_id);
+          
+          -- Index on from_wallet_id: Speeds up "get all transactions from wallet" queries
+          CREATE INDEX IF NOT EXISTS idx_transactions_from_wallet ON transactions(from_wallet_id);
+          
+          -- Index on to_wallet_id: Speeds up "get all transactions to wallet" queries
+          CREATE INDEX IF NOT EXISTS idx_transactions_to_wallet ON transactions(to_wallet_id);
+          
+          -- Index on status: Speeds up "get all pending transactions" queries
+          CREATE INDEX IF NOT EXISTS idx_transactions_status ON transactions(status);
+          
+          -- Index on created_at: Speeds up "get recent transactions" queries (sorted by date)
+          CREATE INDEX IF NOT EXISTS idx_transactions_created_at ON transactions(created_at);
+          "
+          # IF NOT EXISTS: Safe to run multiple times
+          
+          echo "✅ Database migrations completed successfully!"
+        
+        # ============================================
+        # Environment Variables
+        # ============================================
+        # These are injected from ConfigMap and Secret
+        env:
+        # Database name from ConfigMap (non-sensitive)
+        - name: POSTGRES_DB
+          valueFrom:
+            configMapKeyRef:  # Get value from ConfigMap
+              name: app-config  # ConfigMap name
+              key: DB_NAME  # Key in ConfigMap
+        # Database user from Secret (sensitive)
+        - name: POSTGRES_USER
+          valueFrom:
+            secretKeyRef:  # Get value from Secret (encrypted at rest)
+              name: db-secrets  # Secret name
+              key: DB_USER  # Key in Secret
+        # Database password from Secret (sensitive)
+        - name: POSTGRES_PASSWORD
+          valueFrom:
+            secretKeyRef:  # Get value from Secret
+              name: db-secrets  # Secret name
+              key: DB_PASSWORD  # Key in Secret
+        # Note: Secrets are base64 encoded, not encrypted (encryption at rest depends on cluster)
+

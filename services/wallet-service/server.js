@@ -423,6 +423,25 @@ app.post('/wallets',
 // Transfer funds (internal use - called by transaction service)
 // #### Transfer Endpoint with Metrics Tracking ####
 // #### This endpoint tracks transaction metrics and database performance ####
+// ============================================
+// TRANSFER MONEY ENDPOINT
+// ============================================
+// This is where money actually moves between wallets
+// Called by Transaction Service worker when processing a transaction
+//
+// Critical: Database Transaction (ACID)
+// - BEGIN: Start transaction
+// - FOR UPDATE: Lock rows (prevents concurrent modifications)
+// - UPDATE: Debit sender, credit receiver
+// - COMMIT: Save all changes (or ROLLBACK if error)
+//
+// Why database transactions?
+// - Atomicity: Either both updates happen, or neither
+// - Isolation: Row locks prevent race conditions
+// - Consistency: Balances always add up correctly
+//
+// Flow:
+// Transaction Service → Wallet Service → PostgreSQL (atomic transfer)
 app.post('/wallets/transfer',
   validate([
     body('fromUserId').isString().trim().notEmpty(),
@@ -436,9 +455,11 @@ app.post('/wallets/transfer',
     const client = await pool.connect();
     
     try {
+      // STEP 1: Start database transaction
+      // All operations below will either all succeed (COMMIT) or all fail (ROLLBACK)
       await client.query('BEGIN');
       
-      // Track database connection
+      // Track database connection for monitoring
       dbConnections.set({ database: 'postgresql' }, pool.totalCount);
 
       logger.info('Starting transfer', {
@@ -448,33 +469,41 @@ app.post('/wallets/transfer',
         amount
       });
 
-      // Lock rows for update
+      // STEP 2: Lock sender's wallet
+      // FOR UPDATE: Row-level lock prevents other transactions from modifying this wallet
+      // This prevents race conditions (two transfers at once)
+      // If another transaction tries to modify this wallet, it waits
       const fromWallet = await client.query(
         'SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE',
         [fromUserId]
       );
 
+      // STEP 3: Lock receiver's wallet
+      // Same lock mechanism for receiver
       const toWallet = await client.query(
         'SELECT balance FROM wallets WHERE user_id = $1 FOR UPDATE',
         [toUserId]
       );
 
+      // STEP 4: Validate wallets exist
       if (fromWallet.rows.length === 0 || toWallet.rows.length === 0) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK');  // Cancel transaction
         logger.error('Wallet not found in transfer', {
           correlationId,
           fromUserId,
           toUserId
         });
         
-        // Track failed transfer
+        // Track failed transfer for monitoring
         failedTransfers.inc({ reason: 'wallet_not_found', service: 'wallet-service' });
         
         return res.status(404).json({ error: 'Wallet not found' });
       }
 
+      // STEP 5: Check sufficient funds
+      // This prevents negative balances
       if (parseFloat(fromWallet.rows[0].balance) < amount) {
-        await client.query('ROLLBACK');
+        await client.query('ROLLBACK');  // Cancel transaction
         logger.warn('Insufficient funds', {
           correlationId,
           fromUserId,
@@ -482,23 +511,29 @@ app.post('/wallets/transfer',
           requested: amount
         });
         
-        // Track failed transfer
+        // Track failed transfer for monitoring
         failedTransfers.inc({ reason: 'insufficient_funds', service: 'wallet-service' });
         
         return res.status(400).json({ error: 'Insufficient funds' });
       }
 
-      // Update balances
+      // STEP 6: Debit sender (subtract money)
+      // This happens inside the transaction - not committed yet
       await client.query(
         'UPDATE wallets SET balance = balance - $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
         [amount, fromUserId]
       );
 
+      // STEP 7: Credit receiver (add money)
+      // This also happens inside the transaction
       await client.query(
         'UPDATE wallets SET balance = balance + $1, updated_at = CURRENT_TIMESTAMP WHERE user_id = $2',
         [amount, toUserId]
       );
 
+      // STEP 8: Commit transaction
+      // This saves all changes atomically
+      // If this fails, both updates are rolled back (no partial transfer)
       await client.query('COMMIT');
 
       // Invalidate cache
