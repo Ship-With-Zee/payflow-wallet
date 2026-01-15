@@ -48,28 +48,33 @@ spec:
                 secretKeyRef:
                   name: payflow-secrets
                   key: RABBITMQ_PASSWORD
+          resources:
+            requests:
+              memory: "600Mi"  
+              cpu: "800m"       
+            limits:
+              memory: "1Gi"   
+              cpu: "1000m"              
           volumeMounts:
             - name: rabbitmq-data
               mountPath: /var/lib/rabbitmq
           
-          # --- THE SIMPLIFIED FIX ---
           livenessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 120  # Wait 2 full minutes before checking
+            initialDelaySeconds: 120  
             periodSeconds: 30
-            timeoutSeconds: 20        # Allow 20s for the command to respond
+            timeoutSeconds: 20        
             failureThreshold: 5
           
           readinessProbe:
             exec:
               command: ["rabbitmq-diagnostics", "-q", "ping"]
-            initialDelaySeconds: 60   # Wait 1 min before checking readiness
+            initialDelaySeconds: 60   
             periodSeconds: 10
-            timeoutSeconds: 20        # Allow 20s for the command to respond
+            timeoutSeconds: 20        
             failureThreshold: 5
-          # --------------------------
-
+    
   volumeClaimTemplates:
     - metadata:
         name: rabbitmq-data

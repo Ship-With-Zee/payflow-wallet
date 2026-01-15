@@ -27,7 +27,6 @@ spec:
       labels:
         app: api-gateway
     spec:
-      # Security Context for Logs
       securityContext:
         fsGroup: 1001
       
@@ -77,7 +76,6 @@ spec:
                 configMapKeyRef:
                   name: payflow-config
                   key: NOTIFICATION_SERVICE_URL
-            # --------------------------------------------------
 
             # Security (Needs to verify JWTs from Auth Service)
             - name: JWT_SECRET
@@ -91,7 +89,6 @@ spec:
             - name: logs-volume
               mountPath: /app/logs
 
-          # Relaxed Probes
           livenessProbe:
             httpGet:
               path: /health

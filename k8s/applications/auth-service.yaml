@@ -27,7 +27,6 @@ spec:
       labels:
         app: auth-service
     spec:
-      # Security: Allow writing to volumes
       securityContext:
         fsGroup: 1001
       
@@ -37,9 +36,7 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 3004
-          
-          # --- SUSTAINABILITY UPGRADE: Resource Limits ---
-          # Prevents one service from eating all RAM and crashing the cluster
+
           resources:
             requests:
               memory: "128Mi"
@@ -47,7 +44,7 @@ spec:
             limits:
               memory: "512Mi"
               cpu: "500m"
-          # -----------------------------------------------
+
 
           env:
             # 1. Core Config

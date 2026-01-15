@@ -27,7 +27,6 @@ spec:
       labels:
         app: wallet-service
     spec:
-      # Security: Allow writing to volumes
       securityContext:
         fsGroup: 1001
       
@@ -56,9 +55,9 @@ spec:
                 configMapKeyRef:
                   name: payflow-config
                   key: NODE_ENV
-            - name: CONTAINER_ENV   # <--- Wallet Specific
+            - name: CONTAINER_ENV  
               value: "true"
-            - name: SERVICE_NAME    # <--- Wallet Specific
+            - name: SERVICE_NAME   
               value: "wallet-service"
             
             # 2. Universal Database Config

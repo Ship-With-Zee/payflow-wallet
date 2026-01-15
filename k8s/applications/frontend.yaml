@@ -4,13 +4,13 @@ metadata:
   name: payflow-frontend
   namespace: payflow
 spec:
-  type: NodePort  # <--- Exposes it to the outside world
+  type: NodePort 
   selector:
     app: payflow-frontend
   ports:
     - port: 80
       targetPort: 80
-      nodePort: 30000  # Fixed port so you always know where it is
+      nodePort: 30000 
       protocol: TCP
 ---
 apiVersion: apps/v1
@@ -34,8 +34,7 @@ spec:
           imagePullPolicy: Never
           ports:
             - containerPort: 80
-          
-          # Nginx uses very little memory
+
           resources:
             requests:
               memory: "64Mi"
@@ -43,8 +42,6 @@ spec:
             limits:
               memory: "256Mi"
               cpu: "200m"
-
-          # Health Check (Matches your Dockerfile logic)
           livenessProbe:
             httpGet:
               path: /health
